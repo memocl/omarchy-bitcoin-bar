@@ -2,6 +2,10 @@
 
 A native [Omarchy](https://omarchy.org/) 4.0+ bar widget for live Bitcoin network and market data. It ports the compact card interface and interactions of [BitcoinBar for macOS](https://github.com/nmorton13/macos-bitcoin-menu-bar) to Quickshell while following Omarchy's bar, theming, keyboard, and popout conventions.
 
+> **Fork note.** This is `memocl`'s fork of [nmorton13/omarchy-bitcoin-bar](https://github.com/nmorton13/omarchy-bitcoin-bar) with one addition: when a network drops traffic to `mempool.space` — some ISPs and captive portals do, even though the API itself is healthy — every mempool.space request retries against a mirror, so the widget keeps filling in instead of staying empty. It is submitted upstream as [nmorton13/omarchy-bitcoin-bar#1](https://github.com/nmorton13/omarchy-bitcoin-bar/pull/1); if that pull request is merged, prefer upstream.
+>
+> Install it in place of the upstream plugin (same plugin id, so your existing settings are kept): run `omarchy plugin remove nmorton.bitcoin` first if the upstream plugin is installed, then `omarchy plugin add https://github.com/memocl/omarchy-bitcoin-bar.git --enable`.
+
 ![Bitcoin summary](docs/images/bitcoin-summary.png)
 
 <table>
