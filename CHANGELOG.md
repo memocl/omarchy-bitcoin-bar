@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Bitcoin data no longer stays empty on networks that block `mempool.space` (ISP filtering, captive portals, broken routes) even though the API itself is healthy. Every mempool.space request now retries against a fixed list of mempool.space-compatible hosts, and the host that last answered is reused, so only the first refresh after a cold start pays the failed attempt.
+
 ## [1.0.2] - 2026-09-01
 
 - Corrected the author name to Nathan Morton.

@@ -7,13 +7,95 @@ set -euo pipefail
 DEFAULT_MAX_BYTES=262144
 DEFAULT_MAX_TIME=15
 
+# mempool.space-compatible API hosts, primary first. Mirrors expose the
+# identical API and are only consulted when the primary does not answer, which
+# happens on networks that drop traffic to the primary's addresses (ISP
+# filtering, captive portals, broken routes) even though the API itself is
+# healthy. Requests still go to fixed HTTPS endpoints only.
+MEMPOOL_API_HOSTS=("mempool.space" "mempool.emzy.de")
+
 # Script-scoped so the EXIT trap can still see it after main returns.
 fetch_json_tmp=""
 
-# fetch_capped <url> <destination> <max_bytes> <max_time>
+state_dir() {
+  printf '%s' "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-bitcoin-bar"
+}
+
+# remembered_host prints the host that answered last, so a blocked primary costs
+# one failed attempt per refresh instead of one per endpoint.
+remembered_host() {
+  local file host known
+  file="$(state_dir)/api-host"
+  [ -r "$file" ] || return 1
+  host=$(head -n 1 "$file" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$host" ] || return 1
+  for known in "${MEMPOOL_API_HOSTS[@]}"; do
+    if [ "$host" = "$known" ]; then
+      printf '%s' "$host"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# remember_host records a host that answered. Unknown hosts are ignored, so the
+# file can only ever hold one of the fixed endpoints above.
+remember_host() {
+  local host=$1 dir file known
+  for known in "${MEMPOOL_API_HOSTS[@]}"; do
+    if [ "$host" = "$known" ]; then
+      [ "$(remembered_host 2>/dev/null)" = "$host" ] && return 0
+      dir=$(state_dir)
+      file="$dir/api-host"
+      mkdir -p "$dir" 2>/dev/null || return 0
+      printf '%s\n' "$host" >"$file" 2>/dev/null || true
+      return 0
+    fi
+  done
+  return 0
+}
+
+host_of_url() {
+  local rest=${1#*://}
+  printf '%s' "${rest%%/*}"
+}
+
+# candidate_urls <url>: one URL per line. A URL on any known host is rewritten
+# onto every known host, the last host that answered first, so a blocked primary
+# does not take the widget down. Anything else is passed through unchanged.
+candidate_urls() {
+  local url=$1 rest path host first
+  local -a order=()
+
+  case "$url" in
+  https://mempool.space/* | https://mempool.emzy.de/*) ;;
+  *)
+    printf '%s\n' "$url"
+    return 0
+    ;;
+  esac
+
+  rest=${url#*://}
+  path=${rest#*/}
+  first=$(remembered_host) || first=""
+  if [ -n "$first" ]; then
+    order+=("$first")
+  fi
+  for host in "${MEMPOOL_API_HOSTS[@]}"; do
+    if [ "$host" = "$first" ]; then
+      continue
+    fi
+    order+=("$host")
+  done
+  for host in "${order[@]}"; do
+    printf 'https://%s/%s\n' "$host" "$path"
+  done
+}
+
+# fetch_one <url> <destination> <max_bytes> <max_time>
 # Writes the body to destination and returns 0 only when the complete body
 # arrived within the cap. Overflow leaves destination empty and returns 1.
-fetch_capped() {
+fetch_one() {
   local url=$1 destination=$2 max_bytes=$3 max_time=$4
   local -a pipe_status
   local received
@@ -44,6 +126,26 @@ fetch_capped() {
     return 1
   fi
   return 0
+}
+
+# fetch_capped <url> <destination> <max_bytes> <max_time>
+# Tries every candidate host and succeeds as soon as one returns a complete body
+# inside the cap. destination is truncated by each attempt, so a failed host
+# never leaves a partial body behind for the next one.
+fetch_capped() {
+  local url=$1 destination=$2 max_bytes=$3 max_time=$4
+  local candidate
+
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    if fetch_one "$candidate" "$destination" "$max_bytes" "$max_time"; then
+      remember_host "$(host_of_url "$candidate")"
+      return 0
+    fi
+  done < <(candidate_urls "$url")
+
+  : >"$destination"
+  return 1
 }
 
 is_positive_integer() {

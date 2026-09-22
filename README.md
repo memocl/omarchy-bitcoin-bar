@@ -26,7 +26,7 @@ A native [Omarchy](https://omarchy.org/) 4.0+ bar widget for live Bitcoin networ
 - Mempool transaction count and virtual size
 - Difficulty epoch, progress, projected adjustment, average block time, remaining time, and estimated retarget date
 - Manual and 5/10/15-minute automatic refresh options
-- Partial-success updates, last-good values, stale state, bounded curl timeouts, capped response sizes, retries, and exponential retry backoff
+- Partial-success updates, last-good values, stale state, bounded curl timeouts, capped response sizes, retries, exponential retry backoff, and mempool.space mirror failover when the primary host is unreachable
 - Persistent settings through Omarchy's supported `shell.json` API
 - Theme-aware colors and standard Omarchy popup ownership and keyboard behavior
 - No accounts, API keys, analytics, advertising, or tracking
@@ -70,7 +70,7 @@ omarchy plugin remove nmorton.bitcoin
 
 - Omarchy 4.0+
 - `curl` and `jq` (included with Omarchy)
-- Network access to `mempool.space` and `api.coingecko.com`
+- Network access to `mempool.space` (or to one of the mirrors listed below) and `api.coingecko.com`
 - Node.js only for development tests
 
 ## Data sources
@@ -79,6 +79,8 @@ Six fixed requests run concurrently during a refresh:
 
 - [mempool.space](https://mempool.space/): blocks, mempool, recommended fees with projected-block fallback, difficulty adjustment, and fallback fiat price
 - [CoinGecko](https://www.coingecko.com/en/api): multi-fiat prices, market details, and sparkline
+
+mempool.space is requested first. Some networks drop traffic to its addresses (ISP filtering, captive portals, broken routes) while the API itself is healthy, so the same request is retried against the next mempool.space-compatible host in a fixed list—currently [mempool.emzy.de](https://mempool.emzy.de/)—and the host that last answered is reused for later refreshes. The list is compiled into the script; only those fixed HTTPS endpoints are ever contacted, and a state file cannot introduce a new one.
 
 Every request is issued through `scripts/fetch-json.sh`, which enforces a per-endpoint byte cap while the body is received, so an oversized or endless response is abandoned and rejected before it reaches disk, `jq`, or the panel. The parsers in `Model.js` apply matching byte, item, and string caps as a second line of defence. Each request has connection and total timeouts plus one bounded retry. Successful endpoints update independently; failed endpoints retain their last-good values. A complete failure schedules exponential retries capped at five minutes. CoinGecko is preferred for detailed market data, with mempool.space as a USD fallback.
 

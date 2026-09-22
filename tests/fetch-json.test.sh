@@ -75,6 +75,40 @@ check "cli rejects bad max-bytes" "2" "$status"
 bash "$root_dir/scripts/fetch-json.sh" >/dev/null 2>&1 && status=0 || status=$?
 check "cli requires a url" "2" "$status"
 
+# Host failover: a URL on a known mempool.space host expands onto every known
+# host, primary first, and the host that answered last is tried first. All of
+# this is offline: only candidate ordering and state handling are exercised.
+export XDG_STATE_HOME="$work_dir/state"
+
+mapfile -t candidates < <(candidate_urls "https://mempool.space/api/mempool")
+check "known host: primary first" "https://mempool.space/api/mempool" "${candidates[0]}"
+check "known host: mirror second" "https://mempool.emzy.de/api/mempool" "${candidates[1]}"
+check "known host: two candidates" "2" "${#candidates[@]}"
+
+mapfile -t candidates < <(candidate_urls "https://mempool.emzy.de/api/v1/prices")
+check "mirror url: primary kept" "https://mempool.space/api/v1/prices" "${candidates[0]}"
+
+mapfile -t candidates < <(candidate_urls "https://api.coingecko.com/api/v3/x")
+check "unknown url: untouched" "https://api.coingecko.com/api/v3/x" "${candidates[0]}"
+check "unknown url: single candidate" "1" "${#candidates[@]}"
+
+mkdir -p "$XDG_STATE_HOME/omarchy-bitcoin-bar"
+printf 'mempool.emzy.de\n' >"$XDG_STATE_HOME/omarchy-bitcoin-bar/api-host"
+mapfile -t candidates < <(candidate_urls "https://mempool.space/api/mempool")
+check "remembered host first" "https://mempool.emzy.de/api/mempool" "${candidates[0]}"
+check "primary still tried" "https://mempool.space/api/mempool" "${candidates[1]}"
+
+# Only fixed endpoints may be remembered, so the state file can never redirect
+# a request to a host this project does not ship.
+rm -f "$XDG_STATE_HOME/omarchy-bitcoin-bar/api-host"
+remember_host "mempool.emzy.de"
+check "remember_host stores a known host" "mempool.emzy.de" "$(cat "$XDG_STATE_HOME/omarchy-bitcoin-bar/api-host")"
+remember_host "example.com"
+check "remember_host ignores unknown hosts" "mempool.emzy.de" "$(cat "$XDG_STATE_HOME/omarchy-bitcoin-bar/api-host")"
+printf 'example.com\n' >"$XDG_STATE_HOME/omarchy-bitcoin-bar/api-host"
+mapfile -t candidates < <(candidate_urls "https://mempool.space/api/mempool")
+check "unknown remembered host ignored" "https://mempool.space/api/mempool" "${candidates[0]}"
+
 if [ "$failures" -ne 0 ]; then
   printf 'fetch-json.sh: %s check(s) failed\n' "$failures" >&2
   exit 1
